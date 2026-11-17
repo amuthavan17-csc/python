@@ -1,0 +1,995 @@
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+File Processing, Exception Handling & Software 
+Architecture 
+Complete Analytical Solutions, Repaired Implementations, Traces & Complexity Analyses (Tasks 1–6) 
+Task 1: File-Processing Design Review — Diagnose and Repair a Poor Script 
+Marks: 6 | Cognitive Level: K4 – Analyse 
+Task 1.1: Diagnose the Script (2 Marks) 
+Eight critical design deficiencies exist in the hostel mess billing script, each creating concrete operational risks: 
+# Design Deficiency Operational Impact in the Hostel Office 
+1 Hard-coded file path 
+(C:\Users\Office\Desktop\mess_oct.txt) 
+The script cannot run for November or subsequent months without 
+editing source code, and crashes immediately on any other clerk's PC or 
+operating system. 
+2 File is never closed (missing f.close() or 
+with block) 
+File descriptors leak, locking mess_oct.txt on Windows so clerks cannot 
+edit or archive it while Python runs, and risking resource exhaustion in 
+batch runs. 
+3 Reading the whole file into memory at 
+once (data = f.read()) 
+Loads the entire file and splits it into a massive list of strings 
+simultaneously, causing high RAM spikes or MemoryError on multi-year 
+or university-wide billing logs. 
+4 Bare except: with pass Silently swallows every error—including corrupted records, wrong 
+column counts, or KeyboardInterrupt—producing an understated grand 
+total without alerting the accountant. 
+5 Amounts with paise fail int(parts[2]) Bills containing decimal values (e.g., 1250.50) raise ValueError inside int() 
+and are silently skipped by bare except, undercharging the hostel mess 
+revenue. 
+6 String concatenation in a loop (report = 
+report + ...) 
+Strings in Python are immutable; repeated concatenation allocates and 
+copies an increasingly large string on every iteration (O(n²) character 
+copies), slowing down large reports. 
+7 Trailing newline creates an empty last 
+line 
+data.split("\n") produces a trailing "" element. Splitting "" yields [""], 
+causing parts[2] to raise IndexError on every normal run (masked silently 
+by pass). 
+8 Absence of any record of rejected lines When a student's line is malformed or contains a typo, the clerk has no 
+audit trail showing which line number or register number failed, leaving 
+missing bills undetected. 
+ 
+Task 1.2: Repair the Design (3 Marks) 
+from decimal import Decimal, InvalidOperation 
+ 
+ 
+def process_mess_bills(file_path): 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+    """Read mess bills line by line, compute total, and log rejected lines.""" 
+    total = Decimal("0.00") 
+    report_lines = [] 
+    rejected_lines = [] 
+ 
+    with open(file_path, "r", encoding="utf-8") as f: 
+        for line_no, raw_line in enumerate(f, start=1): 
+            line = raw_line.strip() 
+            if not line: 
+                continue  # Safely skip blank/trailing lines 
+ 
+            parts = [item.strip() for item in line.split(",")] 
+            if len(parts) != 3: 
+                rejected_lines.append((line_no, raw_line.rstrip("\n"), "Expected 3 comma
+separated fields")) 
+                continue 
+ 
+            reg_no, name, amount_str = parts 
+            try: 
+                amount = Decimal(amount_str) 
+                if amount < 0: 
+                    raise InvalidOperation("Negative amount") 
+            except InvalidOperation: 
+                rejected_lines.append((line_no, raw_line.rstrip("\n"), f"Invalid amount: 
+'{amount_str}'")) 
+                continue 
+ 
+            total += amount 
+            report_lines.append(f"{reg_no} | {name:<20} | Rs. {amount:.2f}") 
+ 
+    return "\n".join(report_lines), total, rejected_lines 
+ 
+ 
+if __name__ == "__main__": 
+    report, grand_total, rejected = process_mess_bills("mess_oct.txt") 
+    print(report) 
+    print(f"Total: Rs. {grand_total:.2f}") 
+    if rejected: 
+        print("\nRejected Lines:") 
+        for line_no, content, reason in rejected: 
+            print(f"  Line {line_no}: {reason} -> {content}") 
+ 
+Task 1.3: Design Defence (1 Mark) 
+For a 50,000-line file, iterating directly over the file object streams one line at a time, keeping memory usage 
+constant at a few kilobytes instead of loading the entire file and split list into RAM. Using a list with ''.join() 
+eliminates quadratic string copying. Specific exception handling (InvalidOperation) with Decimal prevents silent 
+financial losses on paise amounts while ensuring unexpected bugs are never hidden. Finally, the with context 
+manager guarantees deterministic file closure even if an error occurs, and recording rejected line numbers gives 
+office staff a complete audit trail. 
+Alternative Concept & Complexity Analysis (Task 1) 
+Alternative Solution: Using f.read().splitlines() or f.readlines() loads the entire file into RAM before iterating over the 
+resulting list in memory. 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+• Time Complexity: Both line-by-line iteration and f.read()/f.readlines() run in O(n) time, where n is the number of 
+characters/lines in the file, because every byte is inspected once (note: replacing repeated string '+' with 
+list.append() + ''.join() improves report assembly from O(n²) to O(n)). 
+• Space Complexity (50,000 lines): Reading the whole file via f.read() requires O(file size) memory—holding the raw 
+string buffer plus a 50,000-element list of line strings simultaneously (~5–15 MB depending on line length). 
+Streaming line-by-line via 'for line in f:' uses O(one line) auxiliary read buffer (~8 KB internal chunk buffer), which 
+remains constant regardless of whether the file has 50,000 or 50,000,000 lines. 
+Lab Assessment Workbook | Tasks 1 – 6 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+Task 2: From Requirement to File-Processing Design — Biometric Attendance 
+Files 
+Marks: 8 | Cognitive Level: K3 – Apply 
+Task 2.1: Model the Data (2 Marks) 
+• Input File Format (Daily CSV/Text Files): Named YYYY-MM-DD.txt (e.g., 2026-10-01.txt) inside a monthly 
+folder. Each line has three comma-separated fields: register_number,date,status (e.g., 192311001,2026-10
+01,P), where status is 'P' (Present) or 'A' (Absent). 
+• In-Memory Accumulation Data Structures: A dictionary mapping each register number to a two-element list 
+or dict of counts: counts = {reg_no: {'P': int, 'A': int}} (or collections.defaultdict(lambda: [0, 0])). Damaged lines 
+are accumulated in a list of tuples: damaged_records = [(filename, line_no, raw_line, error_reason)]. 
+• Output File 1 — Monthly Summary & Defaulters Report (attendance_summary.txt): Plain-text tabular report 
+containing all students' Register Number, Present Days, Total Working Days, Attendance Percentage (rounded 
+to 2 decimal places), and Status (ELIGIBLE / BELOW 75%), followed by a dedicated section listing all students 
+below 75%. 
+• Output File 2 — Damaged Lines Audit Log (damaged_lines.log): Line-oriented diagnostic log formatted as 
+[filename:line_no] Reason | Raw Content so technicians can fix biometric export errors. 
+Task 2.2: Design the File Operations (2 Marks) 
+Operation File Mode Encoding Method Used & Justification 
+Reading daily biometric 
+files 
+'r' (Read) utf-8 Direct file iteration ('for line_no, line in enumerate(f, 1):') 
+streams lines lazily with O(1) buffer memory and 
+automatically provides 1-based line numbers. 
+Writing monthly summary 
+report 
+'w' (Write) utf-8 f.write() / f.writelines() inside a 'with' block creates a fresh 
+report per monthly run, overwriting stale summaries cleanly. 
+Writing damaged lines log 'w' or 'a' utf-8 'w' for a fresh per-month audit log (or 'a' if appending across 
+multiple incremental batches) using f.write() with explicit '\n' 
+terminators. 
+ 
+Task 2.3: Design the Processing (3 Marks) 
+PROCEDURE process_monthly_attendance(folder_path, summary_out_path, error_log_path): 
+    INITIALIZE counts AS empty dictionary mapping reg_no -> [present_count, total_count] 
+    INITIALIZE damaged_log AS empty list 
+ 
+    # Discover and sort all daily .txt files in the monthly directory 
+    files <- SORTED list of all files in folder_path ending with ".txt" 
+ 
+    FOR EACH file_path IN files: 
+        OPEN file_path IN mode "r" WITH encoding "utf-8" AS infile: 
+            FOR EACH (line_no, raw_line) IN ENUMERATE(infile, start=1): 
+                line <- STRIP_WHITESPACE(raw_line) 
+                IF line IS EMPTY: 
+                    CONTINUE 
+ 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+                fields <- SPLIT line BY "," 
+                IF LENGTH(fields) != 3: 
+                    APPEND (file_path.name, line_no, line, "Invalid field count") TO damaged_log 
+                    CONTINUE 
+ 
+                reg_no <- STRIP(fields[0]) 
+                date_val <- STRIP(fields[1]) 
+                status <- STRIP(fields[2]) 
+ 
+                IF reg_no IS EMPTY OR date_val IS EMPTY OR status NOT IN {"P", "A"}: 
+                    APPEND (file_path.name, line_no, line, "Missing field or invalid status") TO 
+damaged_log 
+                    CONTINUE 
+ 
+                IF reg_no NOT IN counts: 
+                    counts[reg_no] <- [0, 0] 
+                counts[reg_no][1] <- counts[reg_no][1] + 1 
+                IF status == "P": 
+                    counts[reg_no][0] <- counts[reg_no][0] + 1 
+ 
+    # Write Monthly Percentage Report & <75% Defaulters List 
+    INITIALIZE defaulters AS empty list 
+    OPEN summary_out_path IN mode "w" WITH encoding "utf-8" AS outfile: 
+        WRITE header "RegNo,Present,Total,Percentage" + NEWLINE TO outfile 
+        FOR EACH reg_no IN SORTED_KEYS(counts): 
+            present, total <- counts[reg_no] 
+            pct <- (present / total) * 100.0 
+            WRITE FORMAT("{},{},{},{:.2f}%", reg_no, present, total, pct) + NEWLINE TO outfile 
+            IF pct < 75.0: 
+                APPEND (reg_no, pct) TO defaulters 
+ 
+        WRITE NEWLINE + "=== STUDENTS BELOW 75% ATTENDANCE ===" + NEWLINE TO outfile 
+        FOR EACH (reg_no, pct) IN defaulters: 
+            WRITE FORMAT("{}: {:.2f}%", reg_no, pct) + NEWLINE TO outfile 
+ 
+    # Write Damaged Lines Log 
+    OPEN error_log_path IN mode "w" WITH encoding "utf-8" AS errfile: 
+        FOR EACH (fname, lno, content, reason) IN damaged_log: 
+            WRITE FORMAT("{}:{} | {} | {}", fname, lno, reason, content) + NEWLINE TO errfile 
+END PROCEDURE 
+ 
+Task 2.4: Trace (1 Mark) 
+Sample Input File: 2026-10-01.txt containing 4 lines: 
+Line 1: 192311001,2026-10-01,P 
+Line 2: 192311002,2026-10-01,A 
+Line 3: 192311003,2026-10-01,X 
+Line 4: 192311001,2026-10-01 
+ 
+Line # Raw Line Validation Check State of counts State of damaged_log 
+1 192311001,2026-10-01,P 3 fields; status 'P' valid {'192311001': [1, 1]} [] 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Line # 
+Raw Line 
+Validation Check 
+State of counts 
+State of damaged_log 
+2 
+192311002,2026-10-01,A 
+3 fields; status 'A' valid 
+{'192311001': [1, 1], 
+'192311002': [0, 1]} 
+[] 
+3 
+192311003,2026-10-01,X 
+status 'X' not in {'P','A'} 
+> FAIL 
+Unchanged 
+[('2026-10-01.txt', 3, ..., 
+'Missing field or invalid 
+status')] 
+4 
+192311001,2026-10-01 
+Length 2 != 3 -> FAIL 
+Unchanged 
+[..., ('2026-10-01.txt', 4, ..., 
+'Invalid field count')] 
+Output Summary: 192311001 -> 1/1 = 100.00% (Eligible); 192311002 -> 0/1 = 0.00% (Listed under <75% 
+Defaulters). Error Log records lines 3 and 4 with exact filename and line numbers. 
+Alternative Concept & Complexity Analysis (Task 2) 
+Alternative Solution: First scan all files to collect unique student register numbers; then, for each student s, re-open 
+and scan all f daily files (each with l lines) to tally that student's P/A counts. 
+• Time Complexity: Re-reading all files per student takes O(s · f · l) time (plus O(s · f) expensive disk open/close 
+system calls). Single-pass dictionary accumulation reads each line once in O(f · l) time—for 500 students, 25 days, 
+and 500 lines/file, single-pass executes 12,500 line reads vs. 6,250,000 line reads (500× faster). 
+• Space Complexity: Re-reading per student uses O(1) counter memory per student (though storing the initial 
+student ID set still takes O(s)). Single-pass accumulation uses O(s + d) memory, where s is the number of unique 
+students and d is the number of damaged lines—typically a few kilobytes, making single-pass overwhelmingly 
+superior. 
+Lab Assessment Workbook | Tasks 1 – 6 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+Task 3: Design the Error Handling — Exceptions in the Attendance Processor 
+Marks: 9 | Cognitive Level: K4 – Analyse 
+Task 3.1: Identify the Failures (3 Marks) 
+Failure Scenario Triggering Condition Built-in Exception Raised Recovery / Handling Strategy 
+Missing folder Monthly directory path does 
+not exist 
+FileNotFoundError 
+(subclass of OSError) 
+Log critical path error and abort batch 
+gracefully with user message. 
+Missing file Daily attendance file deleted 
+or not yet uploaded 
+FileNotFoundError Log missing date file in error log and 
+continue processing remaining days. 
+Permission denied OS read/write lock or 
+restricted file permissions 
+PermissionError (subclass 
+of OSError) 
+Log file access failure and skip file (or 
+alert administrator if output is 
+locked). 
+Wrong encoding File saved in Latin-1/UTF-16 
+with non-UTF-8 bytes 
+UnicodeDecodeError 
+(subclass of ValueError) 
+Catch per file, log encoding mismatch, 
+and skip corrupted file without 
+crashing. 
+Damaged line (fields) Missing comma, leaving 
+fewer/more than 3 columns 
+IndexError / ValueError 
+(unpacking) 
+Validate field count and raise custom 
+InvalidRecord; log line number and 
+continue. 
+Damaged line 
+(status) 
+Status value is 'L', 'X', or 
+numeric instead of P/A 
+ValueError (or custom 
+InvalidRecord) 
+Raise InvalidRecord with descriptive 
+reason; record in error list and 
+continue. 
+Empty file 0-byte file produced by idle 
+biometric terminal 
+None (iteration yields 0 
+lines; ZeroDivisionError if 0 
+total days) 
+Guard percentage calculation with 'if 
+total == 0: pct = 0.0' and log empty file 
+warning. 
+ 
+Task 3.2: Design a Custom Exception (2 Marks) 
+• Definition: class InvalidRecord(Exception): pass — inherits from Exception (not BaseException) so standard 
+application error handlers catch it while system exits/interrupts pass through. 
+• Where Raised: Inside the low-level record parser function parse_line(line) whenever structural or domain 
+validation fails (wrong column count, blank register number, or status outside {'P', 'A'}). 
+• Where Handled: Inside the file-reading loop of summarise(path), which owns the file name and current 
+line_no context needed to log (line_no, str(err)) and continue processing subsequent lines. 
+Task 3.3: Use the Complete try Statement (3 Marks) 
+The implementation below demonstrates try, specific except clauses, else (runs only when parsing succeeds 
+without exception), finally (runs unconditionally for cleanup/audit finalisation), and exception chaining via 'raise 
+InvalidRecord(...) from err': 
+class InvalidRecord(Exception): 
+    """Raised when an attendance line violates expected schema or domain rules.""" 
+ 
+ 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+def parse_line(line): 
+    parts = [p.strip() for p in line.strip().split(",")] 
+    try: 
+        reg_no, date_str, status = parts  # Raises ValueError if len(parts) != 3 
+    except ValueError as err: 
+        raise InvalidRecord(f"expected 3 fields, found {len(parts)}") from err 
+ 
+    if status not in ("P", "A"): 
+        raise InvalidRecord(f"invalid status '{status}'") 
+    return reg_no, date_str, status 
+ 
+ 
+def process_with_complete_try(path): 
+    present = absent = 0 
+    errors = [] 
+    f = None 
+    try: 
+        f = open(path, "r", encoding="utf-8") 
+        for line_no, line in enumerate(f, start=1): 
+            if not line.strip(): 
+                continue 
+            try: 
+                _, _, status = parse_line(line) 
+            except InvalidRecord as err: 
+                errors.append((line_no, str(err))) 
+            else: 
+                # Executes ONLY when parse_line succeeded without raising 
+                if status == "P": 
+                    present += 1 
+                else: 
+                    absent += 1 
+    except (FileNotFoundError, PermissionError, UnicodeDecodeError) as file_err: 
+        errors.append((0, f"{type(file_err).__name__}: {file_err}")) 
+    finally: 
+        # Always executes to guarantee resource release 
+        if f is not None and not f.closed: 
+            f.close() 
+    return present, absent, errors 
+ 
+Task 3.4: Misuse Experiment (1 Mark) 
+When specific except clauses are replaced with 'except Exception: pass' and a variable typo is introduced (e.g., 
+typing 'presnt += 1' instead of 'present += 1'): 
+• Observed Outcome: The program terminates normally with exit code 0 and returns (0, 1, [])—reporting zero 
+present students and zero errors despite valid 'P' rows existing in the file. 
+• Why the Error Is Hidden: Python raises NameError: name 'presnt' is not defined on every 'P' row. Because 
+NameError inherits from Exception, the broad 'except Exception: pass' block catches the programming bug, 
+suppresses the traceback, and silently skips every 'P' record as if it were valid. 
+Complete the Code: Working Implementation & Execution Output 
+import os 
+import tempfile 
+ 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+ 
+class InvalidRecord(Exception): 
+    """Raised when a line of the attendance file is not in the expected format.""" 
+ 
+ 
+def parse_line(line): 
+    """'192311001,2026-10-08,P' -> ('192311001', '2026-10-08', 'P')""" 
+    parts = line.strip().split(",") 
+    # TODO 1: Raise InvalidRecord if there are not exactly 3 fields or the status is 
+    # not P or A; otherwise return the 3 fields as a tuple 
+    if len(parts) != 3: 
+        raise InvalidRecord(f"expected 3 fields, found {len(parts)}") 
+    reg_no, date_str, status = parts 
+    if status not in ("P", "A"): 
+        raise InvalidRecord(f"invalid status '{status}'") 
+    return (reg_no, date_str, status) 
+ 
+ 
+def summarise(path): 
+    present, absent, errors = 0, 0, [] 
+    # TODO 2: Open the file with a with statement, parse each line inside try/except 
+    # InvalidRecord, count P and A, and record (line number, message) for bad lines 
+    try: 
+        with open(path, "r", encoding="utf-8") as f: 
+            for line_no, line in enumerate(f, start=1): 
+                if not line.strip(): 
+                    continue 
+                try: 
+                    _, _, status = parse_line(line) 
+                    if status == "P": 
+                        present += 1 
+                    else: 
+                        absent += 1 
+                except InvalidRecord as e: 
+                    errors.append((line_no, str(e))) 
+    except FileNotFoundError: 
+        errors.append((0, f"File not found: {path}")) 
+    return present, absent, errors 
+ 
+ 
+data = ("192311001,2026-10-08,P\n192311002,2026-10-08,A\n" 
+        "192311003,2026-10-08\n192311004,2026-10-08,L\n") 
+with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, 
+                                 encoding="utf-8") as tmp: 
+    tmp.write(data) 
+    tmp_path = tmp.name 
+ 
+print(summarise(tmp_path)) 
+os.remove(tmp_path) 
+ 
+# Missing file test: 
+print(summarise("missing_attendance_2026_10_09.csv")) 
+ 
+Verified Execution Output: 
+(1, 1, [(3, 'expected 3 fields, found 2'), (4, "invalid status 'L'")]) 
+(0, 0, [(0, 'File not found: missing_attendance_2026_10_09.csv')]) 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Alternative Concept & Complexity Analysis (Task 3) 
+Alternative Solution (LBYL — Look Before You Leap): Instead of raising and catching InvalidRecord, parse_line() 
+checks 'if len(parts) != 3 or parts[2] not in ("P", "A"): return None' and summarise() checks 'if result is None: 
+errors.append(...)'. 
+• Time Per Line When Bad Lines Are Rare (<1%): Both EAFP (try/except) and LBYL run in O(1) per line. In Python 
+3.11+, zero-cost try blocks add virtually zero overhead when no exception is raised, making EAFP and LBYL equally 
+fast on clean data. 
+• Time Per Line When Bad Lines Are Common (>30%): Although still asymptotically O(1) per line, constructing an 
+Exception object and unwinding the call stack in EAFP carries a noticeable constant-factor overhead (~5–15× slower 
+per bad line than a simple conditional check). Therefore, LBYL (returning a status/error value via if-checks) has better 
+practical throughput when malformed records are frequent. 
+Lab Assessment Workbook | Tasks 1 – 6 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+Task 4: File and Exception Forensics 
+Marks: 7 | Cognitive Level: K4 – Analyse 
+Task 4.1: Locate the Defects (2 Marks) 
+• 1. Why earlier days are lost: save_returns() opens 'returns.log' with mode 'w' (write/truncate). Every daily call 
+erases the existing file contents from previous days and writes only that day's books. 
+• 2. Why books are joined together on one line: read().split('\n') strips all newline characters from each book 
+title, and log.write(b) writes each string directly without appending '\n', concatenating all titles into a single 
+continuous string (e.g., 'BookABookBBookC'). 
+• 3. What happens to open files when write() fails or exceptions occur: Because neither open('returns.log', 'w') 
+nor open(day_file) uses a with context manager, an exception during log.write(b) (such as Disk Full OSError or 
+TypeError on non-string data) aborts save_returns() before log.close() is reached, leaving the file descriptor 
+open and buffered data unflushed. Furthermore, process() catches only FileNotFoundError and lets write 
+errors crash the program without logging the failure. 
+Task 4.2: Construct Evidence (2 Marks) 
+import os 
+ 
+# Setup 3 days of sample return files 
+sample_days = { 
+    "day1.txt": "Clean Code\nThe Pragmatic Programmer", 
+    "day2.txt": "Fluent Python\nDesign Patterns", 
+    "day3.txt": "Introduction to Algorithms\nRefactoring" 
+} 
+for fname, content in sample_days.items(): 
+    with open(fname, "w", encoding="utf-8") as f: 
+        f.write(content) 
+ 
+# Run the buggy functions across 3 days 
+for day in ["day1.txt", "day2.txt", "day3.txt"]: 
+    process(day) 
+ 
+with open("returns.log", "r", encoding="utf-8") as f: 
+    print("Actual returns.log content:", repr(f.read())) 
+# Output: 'Introduction to AlgorithmsRefactoring' 
+# Evidence: Day 1 and Day 2 are completely overwritten, and Day 3 titles are glued together! 
+ 
+Task 4.3: Repair the Program (2 Marks) 
+from datetime import datetime 
+ 
+ 
+def log_error(message, error_file="error.log"): 
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
+    with open(error_file, "a", encoding="utf-8") as err_f: 
+        err_f.write(f"[{timestamp}] {message}\n") 
+ 
+ 
+def save_returns(books, log_file="returns.log"): 
+    with open(log_file, "a", encoding="utf-8") as log: 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+        for b in books: 
+            title = b.strip() 
+            if title: 
+                log.write(title + "\n") 
+ 
+ 
+def process(day_file, log_file="returns.log", error_file="error.log"): 
+    try: 
+        with open(day_file, "r", encoding="utf-8") as infile: 
+            books = [line.strip() for line in infile if line.strip()] 
+        save_returns(books, log_file=log_file) 
+    except FileNotFoundError: 
+        log_error(f"Missing daily file: {day_file}", error_file) 
+    except OSError as err: 
+        log_error(f"I/O failure while processing {day_file}: {err}", error_file) 
+ 
+Task 4.4: Prevent Recurrence (1 Mark) 
+• Rule 1 — Always Manage Files with 'with' and Explicit Encoding: Never call bare open() without a with 
+statement and explicit encoding='utf-8'; this guarantees deterministic file closure and buffer flushing even 
+when exceptions occur. 
+• Rule 2 — Choose File Modes Deliberately and Persist Diagnostics: Verify whether cumulative logs require 
+append mode ('a') rather than destructive write mode ('w'), preserve explicit '\n' line delimiters on writes, and 
+route all operational exceptions to a persistent error log rather than ephemeral console prints. 
+Alternative Concept & Complexity Analysis (Task 4) 
+Alternative Solution: Opening files manually and closing them inside a 'finally:' block (e.g., f = open(...); try: ... finally: 
+f.close()). 
+• Time & Space Complexity: Identical to 'with' statements—O(n) time to read/write n characters and O(1) auxiliary 
+descriptor overhead—because Python's context manager protocol (__enter__/__exit__) compiles down to the exact 
+same try/finally cleanup semantics. 
+• Open Files on Error: Properly written nested try/finally blocks leave 0 files open on error, matching 'with'. 
+However, if two files are opened sequentially before a single try/finally without nesting, an exception during the 
+second open() skips the finally block and leaves 1 file open—making 'with' strictly safer and less error-prone. 
+ 
+  
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+Task 5: The Same Utility Organised Four Ways 
+Marks: 7 | Cognitive Level: K5 – Evaluate 
+Task 5.1: Four Organisations (3 Marks) 
+Below are all four structural organisations for the attendance processor (reading, computing statistics, and writing 
+reports): 
+(a) Organisation A: Single Script (attendance_single.py) 
+# attendance_single.py 
+def read_records(path): 
+    records = [] 
+    with open(path, "r", encoding="utf-8") as f: 
+        for line in f: 
+            if line.strip(): 
+                reg, date_str, status = [x.strip() for x in line.split(",")] 
+                records.append((reg, date_str, status)) 
+    return records 
+ 
+def compute_percentages(records): 
+    totals = {} 
+    for reg, _, status in records: 
+        p, t = totals.get(reg, (0, 0)) 
+        totals[reg] = (p + (1 if status == "P" else 0), t + 1) 
+    return {reg: round((p / t) * 100, 2) for reg, (p, t) in totals.items()} 
+ 
+def write_report(percentages, out_path): 
+    with open(out_path, "w", encoding="utf-8") as f: 
+        for reg, pct in sorted(percentages.items()): 
+            f.write(f"{reg}: {pct:.2f}%\n") 
+ 
+if __name__ == "__main__": 
+    recs = read_records("october.csv") 
+    write_report(compute_percentages(recs), "summary.txt") 
+ 
+(b) Organisation B: One Library Module + Main Script 
+# attendance_utils.py (contains read_records, compute_percentages, write_report) 
+# main.py: 
+import attendance_utils 
+ 
+if __name__ == "__main__": 
+    recs = attendance_utils.read_records("october.csv") 
+    stats = attendance_utils.compute_percentages(recs) 
+    attendance_utils.write_report(stats, "summary.txt") 
+ 
+(c) Organisation C: Three Modules in One Folder 
+# Folder layout: reader.py | stats.py | report.py | main.py 
+# main.py: 
+import reader 
+import stats 
+import report 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+ 
+if __name__ == "__main__": 
+    recs = reader.read_records("october.csv") 
+    pcts = stats.compute_percentages(recs) 
+    report.write_report(pcts, "summary.txt") 
+ 
+(d) Organisation D: Structured Package attendance/ 
+# Package layout: 
+# attendance/ 
+#   ├── __init__.py   -> exposes read_records, compute_percentages, write_report 
+#   ├── reader.py     -> read_records(path) 
+#   ├── stats.py      -> compute_percentages(records) 
+#   └── report.py     -> write_report(percentages, out_path) 
+# run_app.py: 
+from attendance import reader, stats, report 
+ 
+if __name__ == "__main__": 
+    recs = reader.read_records("october.csv") 
+    pcts = stats.compute_percentages(recs) 
+    report.write_report(pcts, "summary.txt") 
+ 
+Task 5.2: Change the Requirement — 3 Consecutive Absences Report (2 Marks) 
+New Requirement Logic (find_consecutive_absences(records, streak=3)): 
+def find_consecutive_absences(records, streak=3): 
+    by_student = {} 
+    for reg, date_str, status in records: 
+        by_student.setdefault(reg, []).append((date_str, status)) 
+    flagged = [] 
+    for reg, entries in by_student.items(): 
+        consec = 0 
+        for _, status in sorted(entries): 
+            consec = consec + 1 if status == "A" else 0 
+            if consec >= streak: 
+                flagged.append(reg) 
+                break 
+    return sorted(flagged) 
+ 
+Organisation Files Modified Count Details of Changes Required 
+(a) One script attendance_single.py 1 file Add find_consecutive_absences(), update 
+write_report(), and update __main__. 
+(b) One module + main attendance_utils.py, main.py 2 files Add analytics + report writer in 
+attendance_utils.py; call from main.py. 
+(c) Three modules stats.py, report.py, main.py 3 files Add streak logic in stats.py, formatter in 
+report.py, orchestration in main.py (reader.py 
+untouched). 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+Organisation Files Modified Count Details of Changes Required 
+(d) Package attendance/ attendance/stats.py, 
+attendance/report.py, 
+attendance/__init__.py, 
+run_app.py 
+3–4 files Clean separation of concerns: I/O reader 
+untouched; __init__.py re-exports new helper 
+if part of public API. 
+ 
+Task 5.3: Compare the Organisations (2 Marks) 
+Criterion (a) One Script (b) One Module + 
+Main 
+(c) Three Modules (d) Package 
+(attendance/) 
+Readability Good when small 
+(<150 lines); degrades 
+quickly as features 
+grow. 
+Separates execution 
+entry point from 
+reusable library logic. 
+High; each file has a 
+single clear 
+responsibility. 
+Highest; hierarchical 
+namespace documents 
+system architecture. 
+Reuse Poor; importing runs 
+top-level code unless 
+guarded by __main__. 
+Good for single
+domain utilities. 
+High; stats.py can be 
+reused with a database 
+reader. 
+Best; distributable as a 
+clean library across 
+college tools. 
+Testing Harder; logic and script 
+orchestration live 
+together. 
+Clean unit testing of 
+utility module. 
+Isolated unit tests per 
+concern 
+(test_stats.py). 
+Cleanest test suite 
+mirroring package 
+submodules. 
+Naming Conflicts High risk of global 
+variable/helper 
+collisions. 
+Single module 
+namespace. 
+Flat folder risk (e.g., 
+report.py may shadow 
+third-party report libs). 
+Zero collision risk; all 
+submodules live inside 
+attendance.*. 
+ 
+Import Statement Comparison: 
+• import attendance.stats: Loads the package and submodule, binding the full dotted name in the caller's 
+namespace. Functions must be called as attendance.stats.percentage(...). Lowest risk of name collision. 
+• from attendance import stats: Binds the submodule object 'stats' directly in the local namespace. Functions 
+are called as stats.percentage(...). Balances brevity with clear origin. 
+• from attendance.stats import percentage: Binds only the function object 'percentage' directly into the caller's 
+local namespace. Called simply as percentage(...), which is concise but can shadow local functions with the 
+same name. 
+Alternative Concept & Complexity Analysis (Task 5) 
+Alternative Solution: Keeping all functions inside a single monolithic script rather than splitting into a multi-file 
+package. 
+• One-Time Import Cost & Memory: Importing a package incurs a one-time disk lookup and bytecode 
+compilation/load cost across __init__.py and its submodules, storing module objects in sys.modules (~10–30 KB total 
+overhead). Subsequent imports in the same process are O(1) dictionary lookups in sys.modules with zero extra I/O. 
+• Maintenance & Lookup Effort: In a small script (<200 lines), locating a function is instant (Ctrl+F). Once a codebase 
+reaches thousands of lines, a monolithic script forces developers to scan unrelated I/O, math, and formatting code 
+together and risks unintended coupling. A package partitions the search space by domain (reader, stats, report), 
+cutting cognitive load and preventing merge conflicts in team development. 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+Task 6: Design Challenge — College Fest Registration Desk 
+Marks: 13 | Cognitive Level: K5 – Evaluate 
+Stage 1: Interpret the Problem (2 Marks) 
+• Inputs: Five department registration text files (e.g., cse.txt, ece.txt, mech.txt, civil.txt, it.txt). Each non-empty 
+line contains 5 comma-separated fields: register_no, name, department, email, events (where events is 
+semicolon-separated, e.g., Coding;Quiz;Dance). 
+• Outputs: (1) master_registrations.csv (deduplicated clean student records), (2) event_<event_name>.txt (one 
+participant roster file per distinct event), (3) summary_report.txt (totals per department, per event, duplicate 
+count, error count), and (4) registration_errors.log (all malformed lines, invalid emails, duplicates, and missing 
+files). 
+• Testable Requirements:  
+Req ID Testable Requirement Statement 
+REQ-1 Given 5 expected department filenames, if 1 or more files are missing, the system shall log a missing-file 
+warning and process all remaining files without crashing. 
+REQ-2 Given a line with != 5 comma-separated fields or empty required fields, the system shall reject the line, 
+record filename and line number in registration_errors.log, and continue. 
+REQ-3 Given an email failing basic syntax checks (must contain exactly one '@', non-empty local part, domain 
+containing at least one '.' not at start/end, no spaces), the system shall reject the record and log 'Invalid 
+email'. 
+REQ-4 Given two valid records sharing the same normalized register number (case-insensitive), the system shall 
+keep only the first registration in master_registrations.csv and log the second as a duplicate. 
+REQ-5 For each distinct event name across valid unique registrations, the system shall generate a separate 
+event_<event>.txt file listing all registered participants for that event. 
+ 
+Stage 2: Propose the Processing Flow (2 Marks) 
+[5 Dept Files: cse.txt, ece.txt, ...] 
+                  │ 
+                  ▼ 
+     ┌─────────────────────────┐   FileNotFoundError / OSError 
+     │  1. File Reader Stream  │ ──────────────────────────────┐ 
+     └────────────┬────────────┘                               │ 
+                  │ (dept_file, line_no, raw_line)             │ 
+                  ▼                                            │ 
+     ┌─────────────────────────┐   Malformed / Bad Email       │ 
+     │  2. Schema & Email      │ ──────────────────────────────┤ 
+     │     Validator           │                               │ 
+     └────────────┬────────────┘                               │ 
+                  │ Valid Record                               │ 
+                  ▼                                            │ 
+     ┌─────────────────────────┐   reg_no in seen_reg_nos      │ 
+     │  3. Deduplicator        │ ──────────────────────────────┼──► [registration_errors.log] 
+     │     (Set Lookup O(1))   │                               │ 
+     └────────────┬────────────┘                               │ 
+                  │ Unique Clean Record                        │ 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+                  ▼                                            │ 
+     ┌─────────────────────────┐                               │ 
+     │  4. In-Memory Aggregator│                               │ 
+     │     • master_list       │                               │ 
+     │     • event_rosters{}   │                               │ 
+     │     • dept_counts{}     │                               │ 
+     └────────────┬────────────┘                               │ 
+                  │                                            │ 
+                  ▼                                            ▼ 
+  [master_registrations.csv]   [event_<name>.txt]   [summary_report.txt] 
+ 
+Stage 3: Identify the Critical Design Decisions (2 Marks) 
+• Duplicate Detection: Maintain a Python set seen_reg_nos = set() storing uppercased register numbers 
+(reg_no.upper()). Before accepting a valid record, check 'if reg_key in seen_reg_nos:'. Set lookup runs in O(1) 
+average time, keeping the first occurrence and routing subsequent duplicates to the error/audit log. 
+• E-mail Validation Using String Methods Only: Using pure string methods (no regex needed): verify ' ' not in 
+email, email.count('@') == 1, split local, domain = email.split('@'), ensure len(local) > 0 and len(domain) >= 3, 
+'.' in domain, not domain.startswith('.'), and not domain.endswith('.'). 
+• Exception Handling Placement: (a) File-level exceptions (FileNotFoundError, PermissionError, 
+UnicodeDecodeError) are caught in the department file loop so a missing file logs an error and moves to the 
+next department; (b) Record-level validation errors raise a custom RegistrationError inside validator.py and 
+are caught per line in the reader loop so bad lines never abort a file; (c) Output directory/file OSError is caught 
+at the writer boundary. 
+Stage 4: Design the Package (4 Marks) 
+fest_desk/ 
+  ├── __init__.py       # Exposes run_registration_desk() 
+  ├── validator.py      # RegistrationError, is_valid_email(email), parse_registration(line) 
+  ├── processor.py      # load_department_file(path, seen_set, master, events_map, errors) 
+  └── writer.py         # write_master(), write_event_files(), write_summary(), 
+write_error_log() 
+ 
+# Pseudocode for Reading, Validating, and Writing 
+FUNCTION is_valid_email(email): 
+    IF " " IN email OR COUNT(email, "@") != 1: RETURN False 
+    local, domain <- SPLIT(email, "@") 
+    IF EMPTY(local) OR "." NOT IN domain OR STARTSWITH(domain, ".") OR ENDSWITH(domain, "."): 
+        RETURN False 
+    RETURN True 
+ 
+FUNCTION process_all_departments(dept_files, output_dir): 
+    seen_reg_nos <- EMPTY_SET 
+    master_list <- EMPTY_LIST 
+    event_rosters <- EMPTY_DICT   # event_name -> list of (reg_no, name, dept, email) 
+    errors <- EMPTY_LIST 
+ 
+    FOR EACH filepath IN dept_files: 
+        TRY: 
+            OPEN filepath FOR READING (utf-8) AS f: 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+                FOR EACH (line_no, line) IN ENUMERATE(f, 1): 
+                    IF STRIP(line) IS EMPTY: CONTINUE 
+                    TRY: 
+                        record <- parse_registration(line)  # validates 5 fields, email, >=1 
+event 
+                        IF record.reg_no IN seen_reg_nos: 
+                            APPEND (filepath, line_no, "Duplicate registration: " + 
+record.reg_no) TO errors 
+                            CONTINUE 
+                        ADD record.reg_no TO seen_reg_nos 
+                        APPEND record TO master_list 
+                        FOR EACH ev IN record.events: 
+                            APPEND record TO event_rosters[ev] 
+                    CATCH RegistrationError AS err: 
+                        APPEND (filepath, line_no, MESSAGE(err)) TO errors 
+        CATCH FileNotFoundError: 
+            APPEND (filepath, 0, "Missing department file") TO errors 
+ 
+    write_master(output_dir + "/master_registrations.csv", master_list) 
+    write_event_files(output_dir, event_rosters) 
+    write_summary(output_dir + "/summary_report.txt", master_list, event_rosters, errors) 
+    write_error_log(output_dir + "/registration_errors.log", errors) 
+ 
+Stage 5: Implement and Demonstrate (3 Marks) 
+import os 
+import tempfile 
+from pathlib import Path 
+ 
+ 
+# --- fest_desk/validator.py --- 
+class RegistrationError(Exception): 
+    """Raised when a registration line fails format or field validation.""" 
+ 
+ 
+def is_valid_email(email): 
+    if not email or " " in email or email.count("@") != 1: 
+        return False 
+    local, domain = email.split("@") 
+    if not local or len(domain) < 3 or "." not in domain: 
+        return False 
+    if domain.startswith(".") or domain.endswith(".") or ".." in domain: 
+        return False 
+    return True 
+ 
+ 
+def parse_registration(line): 
+    parts = [p.strip() for p in line.strip().split(",")] 
+    if len(parts) != 5: 
+        raise RegistrationError(f"Expected 5 fields, got {len(parts)}") 
+    reg_no, name, dept, email, events_raw = parts 
+    if not reg_no or not name or not dept: 
+        raise RegistrationError("Missing required identity field (reg_no/name/dept)") 
+    if not is_valid_email(email): 
+        raise RegistrationError(f"Invalid email address: '{email}'") 
+    events = [e.strip() for e in events_raw.split(";") if e.strip()] 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+    if not events: 
+        raise RegistrationError("No events selected") 
+    return { 
+        "reg_no": reg_no.upper(), 
+        "name": name, 
+        "dept": dept.upper(), 
+        "email": email.lower(), 
+        "events": events, 
+    } 
+ 
+ 
+# --- fest_desk/processor.py & writer.py --- 
+def run_registration_desk(dept_files, output_dir): 
+    out_path = Path(output_dir) 
+    out_path.mkdir(parents=True, exist_ok=True) 
+ 
+    seen_reg_nos = set() 
+    master_list = [] 
+    event_rosters = {} 
+    errors = [] 
+ 
+    for fpath in dept_files: 
+        p = Path(fpath) 
+        try: 
+            with open(p, "r", encoding="utf-8") as f: 
+                for line_no, raw in enumerate(f, start=1): 
+                    if not raw.strip(): 
+                        continue 
+                    try: 
+                        rec = parse_registration(raw) 
+                        if rec["reg_no"] in seen_reg_nos: 
+                            errors.append((p.name, line_no, f"Duplicate register number: 
+{rec['reg_no']}")) 
+                            continue 
+                        seen_reg_nos.add(rec["reg_no"]) 
+                        master_list.append(rec) 
+                        for ev in rec["events"]: 
+                            event_rosters.setdefault(ev, []).append(rec) 
+                    except RegistrationError as err: 
+                        errors.append((p.name, line_no, str(err))) 
+        except FileNotFoundError: 
+            errors.append((p.name, 0, "Missing department file")) 
+        except OSError as err: 
+            errors.append((p.name, 0, f"File I/O error: {err}")) 
+ 
+    # 1. Master list 
+    with open(out_path / "master_registrations.csv", "w", encoding="utf-8") as mf: 
+        mf.write("RegNo,Name,Dept,Email,Events\n") 
+        for r in master_list: 
+            
+mf.write(f"{r['reg_no']},{r['name']},{r['dept']},{r['email']},{';'.join(r['events'])}\n") 
+ 
+    # 2. Event-wise participant files 
+    for ev, participants in sorted(event_rosters.items()): 
+        safe_ev = "".join(c if c.isalnum() else "_" for c in ev.lower()) 
+        with open(out_path / f"event_{safe_ev}.txt", "w", encoding="utf-8") as ef: 
+            ef.write(f"Event: {ev} (Total: {len(participants)})\n") 
+            for r in participants: 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+Lab Assessment Workbook | Tasks 1 – 6 
+                ef.write(f"{r['reg_no']} - {r['name']} ({r['dept']}) <{r['email']}>\n") 
+ 
+    # 3. Summary report 
+    with open(out_path / "summary_report.txt", "w", encoding="utf-8") as sf: 
+        sf.write("=== COLLEGE FEST REGISTRATION SUMMARY ===\n") 
+        sf.write(f"Total Valid Unique Registrations : {len(master_list)}\n") 
+        sf.write(f"Total Events with Participants   : {len(event_rosters)}\n") 
+        sf.write(f"Total Errors / Duplicates Logged : {len(errors)}\n\nEvent Breakdown:\n") 
+        for ev, participants in sorted(event_rosters.items()): 
+            sf.write(f"  - {ev}: {len(participants)} participant(s)\n") 
+ 
+    # 4. Error log 
+    with open(out_path / "registration_errors.log", "w", encoding="utf-8") as errf: 
+        for fname, lno, msg in errors: 
+            errf.write(f"[{fname}:Line {lno}] {msg}\n") 
+ 
+ 
+# --- Demonstration Test Suite --- 
+if __name__ == "__main__": 
+    with tempfile.TemporaryDirectory() as tmpdir: 
+        base = Path(tmpdir) 
+        (base / "cse.txt").write_text( 
+            "23CS001,Aarav Kumar,CSE,aarav@college.edu,Coding;Quiz\n" 
+            "23CS002,Diya Nair,CSE,diya.bad-email.com,Dance\n",          # Invalid email 
+            encoding="utf-8" 
+        ) 
+        (base / "ece.txt").write_text( 
+            "23EC010,Rohan Das,ECE,rohan@college.edu,Coding;Robotics\n" 
+            "23CS001,Aarav Kumar,CSE,aarav@college.edu,Music\n"          # Duplicate reg_no 
+            "23EC011,Broken Line Only Three Fields,ECE\n",               # Damaged line 
+            encoding="utf-8" 
+        ) 
+        # mech.txt is intentionally omitted to test missing department file handling 
+        files = [base / "cse.txt", base / "ece.txt", base / "mech.txt"] 
+        out_dir = base / "output" 
+        run_registration_desk(files, out_dir) 
+ 
+        print("--- SUMMARY REPORT ---") 
+        print((out_dir / "summary_report.txt").read_text(encoding="utf-8")) 
+        print("--- ERROR LOG ---") 
+        print((out_dir / "registration_errors.log").read_text(encoding="utf-8")) 
+ 
+Verified Demonstration Output: --- SUMMARY REPORT --- 
+=== COLLEGE FEST REGISTRATION SUMMARY === 
+Total Valid Unique Registrations : 2 
+Total Events with Participants   : 3 
+Total Errors / Duplicates Logged : 4 
+ 
+Event Breakdown: 
+  - Coding: 2 participant(s) 
+  - Quiz: 1 participant(s) 
+  - Robotics: 1 participant(s) 
+ --- ERROR LOG --- 
+[cse.txt:Line 2] Invalid email address: 'diya.bad-email.com' 
+Python File Processing, Exception Handling & Modular Design — Complete Solutions 
+[ece.txt:Line 2] Duplicate register number: 23CS001 
+[ece.txt:Line 3] Expected 5 fields, got 3 
+[mech.txt:Line 0] Missing department file 
+Alternative Concept & Complexity Analysis (Task 6) 
+Alternative Solution: Checking for duplicates by scanning a Python list of all previously accepted registrations ('if 
+reg_no in [r["reg_no"] for r in master_list]:') instead of maintaining a hash set (seen_reg_nos). 
+• Time Complexity for n Registrations: Linear list scanning performs 1 + 2 + ... + (n − 1) = n(n − 1)/2 comparisons, 
+resulting in O(n²) quadratic time (e.g., ~12.5 million string comparisons for 5,000 students). A Python set uses open
+addressed hash tables, delivering O(1) average lookup per record and O(n) total linear time. 
+• Space Complexity: Scanning master_list directly uses O(n) space for the records alone with zero extra index 
+memory. Maintaining a separate set of n register number strings uses O(n) additional hash-table memory (roughly 
+32–64 bytes per entry plus string pointers, ~300 KB for 5,000 students)—a negligible memory cost in exchange for 
+eliminating an O(n²) bottleneck. 
+Lab Assessment Workbook | Tasks 1 – 6 

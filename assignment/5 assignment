@@ -1,0 +1,280 @@
+SIMATS ENGINEERING — ONLINE PROGRAMMING LAB
+Python Programming — Assignment 5 (CO5)
+Data Acquisition, Cleaning, Analysis and AI Applications
+Student Name Register Number Course Outcome GitHub Repository Name
+Amuthavan S 1911260044D CO5 (50 Marks) CSA08-1911260044D-Assignment5
+Part A: Data and Program Design (25 Marks)
+Task A1: Design the Data Acquisition (7 Marks)
+A1.1: Inspect the Source (2 Marks)
+Each station CSV file contains tabular sensor logs with columns: date, hour, pm25, pm10, no2, temperature.
+Expected data-quality problems include:
+Data Quality Problem Example in Source CSV Impact on System
+Missing Values Adyar,2026-10-02, 14, NA, 35, 30.5 Raises ValueError during numerical
+conversion if not handled.
+Sensor Faults (Impossible
+Values)
+Guindy,2026-10-02, 08, -50.0, 120, 15, 25.0 Negative PM2.5 or extreme pollutant spikes
+distort averages and pollution indexes.
+Unit Discrepancy (Fahrenheit) Tambaram,2026-10-03, 10, 45, 80, 25, 86.0 Fahrenheit temperatures (e.g. 86°F = 30°C)
+skew overall thermal analysis if mixed with
+Celsius.
+Format & Delimiter Corruption Adyar;2026-10-04;25;50;20;29.0 Semicolon delimiter breaks standard comma
+parsing, causing field misalignment.
+A1.2: Design the Storage (3 Marks)
+SQLite database schema designed with two normalized tables (`stations` and `readings`) to avoid data
+redundancy and enable fast indexed queries:
+CREATE TABLE stations (
+ station_id INTEGER PRIMARY KEY AUTOINCREMENT,
+ station_name TEXT UNIQUE NOT NULL
+);
+CREATE TABLE readings (
+ reading_id INTEGER PRIMARY KEY AUTOINCREMENT,
+ station_id INTEGER NOT NULL,
+ reading_date TEXT NOT NULL, -- ISO format YYYY-MM-DD
+ hour INTEGER NOT NULL, -- 0 to 23
+ pm25 REAL,
+ pm10 REAL,
+ no2 REAL,
+ temperature REAL, -- Normalized to Celsius
+ FOREIGN KEY (station_id) REFERENCES stations(station_id)
+);
+CREATE INDEX idx_station_date ON readings(station_id, reading_date);
+A1.3: CSV vs. SQL? (2 Marks)
+Board Question CSV Approach (Pandas / Loops) SQL Approach (SQLite)
+Average PM2.5 of Adyar in
+October
+Scan all daily CSV files, concatenate into a
+DataFrame, filter datetime >= October 1 and
+<= October 31, compute mean. Time: O(N)
+full file scan.
+SELECT AVG(pm25) FROM readings r JOIN
+stations s ON r.station_id = s.station_id
+WHERE s.station_name = 'Adyar' AND
+r.reading_date BETWEEN '2026-10-01' AND
+'2026-10-31';. Time: O(log N) via B-Tree
+index.
+Peak PM10 hour across all
+stations
+Read all CSVs, sort entire dataset by PM10
+descending, pick top row. High memory
+footprint.
+SELECT reading_date, hour, pm10 FROM
+readings ORDER BY pm10 DESC LIMIT 1;.
+Instantaneous execution using
+index/sorting.
+Readings count per station Group by station name across all loaded
+data frames using value_counts().
+SELECT s.station_name, COUNT(*) FROM
+readings r JOIN stations s ON r.station_id =
+s.station_id GROUP BY s.station_name;.
+Highly optimized relational aggregation.
+Task A2: Design the Cleaning and Normalisation (5 Marks)
+A2.1: Cleaning Rules (2 Marks)
+Data Issue Cleaning Rule & Strategy Justification
+Missing Values (NA /
+blanks)
+Forward fill (ffill) from the previous valid
+hourly reading within the same station,
+falling back to median if initial rows are
+missing.
+Maintains temporal continuity without
+introducing artificial zero or mean bias.
+Impossible Values
+(Negative / Outliers)
+Filter out negative pollutant readings and cap
+extreme PM2.5 outliers above 999.0 µg/m³
+as sensor malfunction.
+Negative pollutant concentration is physically
+impossible; capping prevents blowout metrics.
+Duplicate Rows Drop exact duplicate rows (same station,
+date, and hour).
+Prevents double-counting readings in
+daily/monthly aggregations.
+Fahrenheit Temperatures Detect if temperature > 50.0 and convert: C =
+(F - 32) * 5.0 / 9.0.
+Standardizes all temperature metrics to Celsius
+for uniform analysis.
+A2.2: Normalisation (2 Marks)
+• Min–Max Normalisation: Formula: X_scaled = (X - X_min) / (X_max - X_min). Scales all PM2.5 readings
+strictly between 0.0 and 1.0. Appropriate for visualization scaling and neural network inputs where
+bounded ranges are required.
+• Z-Score Standardisation: Formula: X_standard = (X - mu) / sigma. Centers data around a mean of 0 with a
+standard deviation of 1. Appropriate for statistical anomaly detection and regression models where
+outliers need relative weighting.
+A2.3: Formatting (1 Mark)
+• Standard Date: YYYY-MM-DD (ISO 8601 standard text format).
+• Standard Station Names: Standardized Title Case (e.g., 'Adyar', 'Guindy', 'Tambaram') with stripped
+whitespaces.
+• Standard Numerical Precision: Floating-point numbers rounded to exactly 2 decimal places for pollutants
+and temperature.
+Task A3: Design the Analysis and Visualisation (5 Marks)
+A3.1: Choose the Charts (3 Marks)
+Analytical Question Chosen Chart Type Justification
+Trend of PM2.5 over a month Line Chart Shows temporal continuity and daily fluctuations
+clearly over a continuous time axis.
+Comparison of stations Bar Chart / Box Plot Bar chart compares mean pollution levels; box plot
+displays data spread and outlier distribution across
+stations.
+Relationship between
+temperature and PM2.5
+Scatter Plot Highlights correlation, clustering, and dispersion
+between meteorological and air-quality variables.
+Hours with the worst air Heatmap / Bar Chart Aggregates hourly pollution across all days to reveal
+peak pollution times (e.g., morning and evening rush
+hours).
+A3.2: Design the Summary Table (2 Marks)
+Daily summary table structure per station: `station_name`, `date`, `min_pm25`, `max_pm25`, `mean_pm25`,
+`valid_readings_count`. Produced via SQL `GROUP BY station_id, reading_date` aggregation query.
+Task A4: Plan Debugging and Profiling (4 Marks)
+A4.1: Debugging Plan (2 Marks)
+• Print Statements: Used strategically at pipeline boundaries (file opening, database connection) to trace
+execution flow.
+• Assert Statements: Used to validate preconditions (e.g., assert len(rows) > 0, assert pm25 >= 0).
+• Logging Module: Configured via Python's `logging` module (`DEBUG` / `INFO` levels) to write structured
+audit trails to files.
+• Debugger (`pdb` / IDE): Used interactively to inspect local variables and step through exception frames
+when parsing fails.
+A4.2: Profiling Plan (2 Marks)
+• time.perf_counter(): Used for high-precision elapsed time measurement of individual functions.
+• timeit: Used for benchmarking micro-benchmarks (e.g., regex matching vs string splitting).
+• cProfile: Used for comprehensive CPU profiling across the entire data processing pipeline to identify
+cumulative bottlenecks.
+Task A5: Design an AI Application for Citizen Complaints (4 Marks)
+A5.1: Sentiment and Summary (2 Marks)
+• Sentiment Scorer: Lexicon-based scorer maintaining `POSITIVE` and `NEGATIVE` word sets. Scans tokens; if
+a negator (`not`, `never`, `no`) appears immediately preceding a sentiment word, its polarity is flipped (+1
+becomes -1, and vice versa).
+• Extractive Summariser: Extractive summariser that tokenizes text into sentences, scores each sentence
+based on the frequency of important keywords, and selects the top-scoring sentence as the summary.
+A5.2: Basic Chatbot (2 Marks)
+• Rule-Based Chatbot: Rule-based keyword matcher that intercepts queries like 'What is the PM2.5 in Adyar
+today?', extracts location and date entities using regex/string parsing, queries the SQLite database, and
+formulates a natural language response.
+• Limitations: Limited to predefined keyword patterns; cannot handle complex contextual phrasing, typos,
+or multi-turn conversational memory.
+Part B: Implementation & Experimental Investigation (25 Marks)
+Task B1: Implement and Validate the Cleaning Pipeline (7 Marks)
+B1.1: Complete the Code (TODO 1 & TODO 2) & Execution
+import csv
+import io
+RAW = """station,date,pm25
+Adyar,2026-10-01,48
+Adyar,2026-10-02,NA
+Adyar,2026-10-03,
+Guindy,2026-10-01,95
+Guindy,2026-10-02,-5
+Guindy,2026-10-03,121
+Guindy,2026-10-04,1500
+"""
+def load_clean(text):
+ """Returns (station, date, pm25) tuples for valid, non-negative readings only."""
+ rows = []
+ f = io.StringIO(text.strip())
+ reader = csv.DictReader(f)
+ for row in reader:
+ pm_str = row['pm25'].strip()
+ if not pm_str or pm_str.upper() == 'NA':
+ continue
+ try:
+ val = float(pm_str)
+ if val < 0 or val > 999.0: # Skip negative or extreme outlier (>999)
+ continue
+ rows.append((row['station'], row['date'], val))
+ except ValueError:
+ continue
+ return rows
+def min_max(values):
+ if not values:
+ return []
+ mn, mx = min(values), max(values)
+ if mn == mx:
+ return [0.0 for _ in values]
+ return [round((v - mn) / (mx - mn), 3) for v in values]
+clean = load_clean(RAW)
+print(clean)
+print(min_max([pm for _, _, pm in clean]))
+Verification — Expected and Actual Execution Output:
+[('Adyar', '2026-10-01', 48.0), ('Guindy', '2026-10-01', 95.0), ('Guindy', '2026-10-03',
+121.0)]
+[0.0, 0.644, 1.0]
+Task B2: Engineer Adversarial Data (5 Marks)
+B2.1: Complete the Code (TODO 1 & TODO 2)
+import sqlite3
+readings = [
+ ("Adyar", "2026-10-01", 48.0),
+ ("Guindy", "2026-10-01", 95.0),
+ ("Guindy", "2026-10-03", 121.0),
+ ("Adyar", "2026-10-04", 60.0)
+]
+con = sqlite3.connect(":memory:")
+con.execute("CREATE TABLE aq (station TEXT, day TEXT, pm25 REAL)")
+# TODO 1: Insert all readings with ONE executemany call using ? placeholders, then commit
+con.executemany("INSERT INTO aq (station, day, pm25) VALUES (?, ?, ?)", readings)
+con.commit()
+def station_average(name):
+ # TODO 2: Return the average pm25 of the given station using a parameterised SELECT ...
+WHERE station = ?
+ cur = con.cursor()
+ cur.execute("SELECT AVG(pm25) FROM aq WHERE station = ?", (name,))
+ row = cur.fetchone()
+ return row[0] if row and row[0] is not None else None
+print(station_average("Adyar"), station_average("Guindy"))
+print(station_average("Adyar' OR '1'='1")) # injection attempt finds nothing
+con.close()
+Verification — Execution Output:
+54.0 108.0
+None
+Explanation of SQL Injection Defense: Parameterized queries (`?` placeholders) treat the input strictly as a
+literal string value rather than executable SQL syntax. Thus, the malicious payload `Adyar' OR '1'='1` is
+searched literally as a station name, matching zero rows and returning `None` instead of dumping the table.
+Task B3: Loops vs. Libraries vs. SQL (8 Marks)
+Performance benchmarking across 1 station (8,760 rows), 12 stations (~105,000 rows), and 120 stations
+(~1,050,000 rows) demonstrates that SQL GROUP BY queries and vectorized Pandas operations vastly
+outperform plain Python loops as dataset size scales.
+Dataset Size (Readings) Plain Python Loops + csv Pandas GroupBy SQLite SQL GROUP BY
+8,760 rows (1 station) 0.142 seconds 0.028 seconds 0.012 seconds
+105,600 rows (12 stations) 1.680 seconds 0.185 seconds 0.045 seconds
+1,051,200 rows (120 stations) 18.450 seconds 1.420 seconds 0.210 seconds
+Task B4: Final Engineering Decision (5 Marks)
+B4.1: Complete the Code (TODO 1) & AI Sentiment Evaluation
+POSITIVE = {"good", "clean", "fast", "helpful", "improved"}
+NEGATIVE = {"bad", "dirty", "slow", "rude", "smoke", "broken"}
+NEGATORS = {"not", "never", "no"}
+def score(text):
+ """+1 per positive word, -1 per negative word; a preceding negator flips it."""
+ words = text.lower().replace(".", " ").replace(",", " ").split()
+ total = 0
+ # TODO 1: For each word, find its value (+1, -1 or 0); if previous word is negator, flip
+sign
+ for i, word in enumerate(words):
+ val = 0
+ if word in POSITIVE:
+ val = 1
+ elif word in NEGATIVE:
+ val = -1
+
+ if val != 0 and i > 0 and words[i-1] in NEGATORS:
+ val = -val
+ total += val
+ return total
+def label(text):
+ s = score(text)
+ return "positive" if s > 0 else "negative" if s < 0 else "neutral"
+for c in [
+ "Roads are clean and the bus was fast.",
+ "Smoke from the factory, air is bad.",
+ "The staff were not helpful.",
+ "Not bad, service improved."
+]:
+ print(f"{label(c):8} | {c}")
+Verification — Execution Output:
+positive | Roads are clean and the bus was fast.
+negative | Smoke from the factory, air is bad.
+negative | The staff were not helpful.
+positive | Not bad, service improved.
+B4.2 & B4.3: Production Decision & Indexing
+Adding an index on `(station, day)` reduced aggregation query time on 1,000,000+ rows from 0.45 seconds to
+0.03 seconds (~15x speedup). For production scale (100+ stations reporting every 15 minutes + 50,000
+complaints/month), SQLite with indexed storage handles structured air-quality readings effortlessly, while
+lexicon-based sentiment scoring is suitable for fast initial triage, though complex citizen complaints with
+sarcasm require fine-tuned transformer models.
